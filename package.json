@@ -2,10 +2,17 @@
   "name": "passkeys-webauthn",
   "module": "app/index.ts",
   "type": "module",
+  "scripts": {
+    "server": "bun app/index.ts"
+  },
   "devDependencies": {
+    "@simplewebauthn/types": "^10.0.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "@simplewebauthn/server": "^10.0.0"
   }
 }

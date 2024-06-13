@@ -59,9 +59,16 @@
         cursor: pointer;
         color: #4caf50;
       }
+
+      button[type="button"] {
+        margin-top: 20px;
+      }
     </style>
+    <script src="https://unpkg.com/@simplewebauthn/browser/dist/bundle/index.umd.min.js"></script>
   </head>
   <body>
+    <h1 id="username" style="text-align: center; display: none"></h1>
+
     <div class="container" id="login-container">
       <h2>Login</h2>
       <form id="login-form">
@@ -80,6 +87,9 @@
           required
         />
         <button type="submit">Login</button>
+        <button type="button" onclick="webAuthnLogin()">
+          Login with WebAuthn
+        </button>
       </form>
       <div class="toggle" onclick="toggleForms()">
         Don't have an account? Register
@@ -103,39 +113,46 @@
           required
         />
         <button type="submit">Register</button>
+        <button type="button" onclick="webAuthnRegister()">
+          Register with WebAuthn
+        </button>
       </form>
       <div class="toggle" onclick="toggleForms()">
         Already have an account? Login
       </div>
     </div>
-    <div class="container"><button onclick="test()">Test</button></div>
+
     <script>
       const loginForm = document.querySelector("#login-form");
       const registerForm = document.querySelector("#register-form");
       const loginContainer = document.querySelector("#login-container");
       const registerContainer = document.querySelector("#register-container");
+      const userElement = document.querySelector("#username");
 
-      function resetForm() {
-        loginForm.reset();
-        registerForm.reset();
+      function showName(name, isWebAuthn) {
+        userElement.style.display = "block";
+        userElement.textContent = `Current User: ${name} ${
+          isWebAuthn ? "(web authn)" : ""
+        }`;
       }
 
       function getLoginValue() {
         const username = document.querySelector("#login-username").value;
         const password = document.querySelector("#login-password").value;
-        resetForm();
+        loginForm.reset();
         return { username, password };
       }
 
       function getRegisterValue() {
         const username = document.querySelector("#register-username").value;
         const password = document.querySelector("#register-password").value;
-        resetForm();
+        registerForm.reset();
         return { username, password };
       }
 
       function toggleForms() {
-        resetForm();
+        loginForm.reset();
+        registerForm.reset();
         if (loginContainer.style.display === "none") {
           loginContainer.style.display = "block";
           registerContainer.style.display = "none";
@@ -145,7 +162,7 @@
         }
       }
 
-      async function Login(event) {
+      async function login(event) {
         event.preventDefault();
         const { username, password } = getLoginValue();
         try {
@@ -155,13 +172,13 @@
             body: JSON.stringify({ username, password }),
           });
 
-          const data = await response.json();
+          const { message, user } = await response.json();
 
-          if (data.success) {
-            alert("Login successful");
-          } else {
-            alert("Login failed");
+          if (response.status !== 200) {
+            alert(message);
+            return;
           }
+          showName(user);
         } catch (error) {
           console.error("Error:", error);
         }
@@ -177,26 +194,106 @@
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ username, password }),
           });
+          const { message, user } = await response.json();
+          if (response.status !== 200) {
+            alert(message);
+            return;
+          }
+          showName(user);
+        } catch (error) {
+          console.error("Error:", error);
+        }
+      }
 
-          const data = await response.json();
+      registerForm.addEventListener("submit", register);
+      loginForm.addEventListener("submit", login);
 
-          if (data.success) {
-            alert("Registration successful");
-          } else {
-            alert("Registration failed");
+      // ----- Web Authn -----
+      const { startRegistration, startAuthentication } = SimpleWebAuthnBrowser;
+
+      async function webAuthnRegister() {
+        event.preventDefault();
+        const { username } = getRegisterValue();
+
+        try {
+          const response = await fetch("/api/webAuthn/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username }),
+          });
+          const { options, message } = await response.json();
+          if (response.status !== 200) {
+            alert(message);
+            return;
+          }
+
+          let attResp;
+          try {
+            attResp = await startRegistration(options);
+          } catch (error) {
+            if (error.name === "InvalidStateError") {
+              alert(
+                "Error: Authenticator was probably already registered by user"
+              );
+            } else {
+              alert(error);
+            }
+
+            throw error;
+          }
+
+          const verificationResp = await fetch(
+            "/api/webAuthn/verify-registration",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ username, body: attResp }),
+            }
+          );
+
+          const { verified } = await verificationResp.json();
+          if (verified) {
+            showName(username, true);
           }
         } catch (error) {
           console.error("Error:", error);
         }
       }
 
-      loginForm.addEventListener("submit", Login);
-      registerForm.addEventListener("submit", register);
+      async function webAuthnLogin() {
+        const { username } = getLoginValue();
+        const response = await fetch("/api/webAuthn/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username }),
+        });
+        const { options, message } = await response.json();
+        if (response.status !== 200) {
+          alert(message);
+          return;
+        }
 
-      async function test() {
-        const response = await fetch("/api/users");
-        const data = await response.json();
-        console.log(data);
+        let asseResp;
+        try {
+          asseResp = await startAuthentication(options);
+        } catch (error) {
+          alert(error.message);
+          throw error;
+        }
+
+        const verificationResp = await fetch(
+          "api/webAuthn/verify-authentication",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, body: asseResp }),
+          }
+        );
+
+        const { verified } = await verificationResp.json();
+        if (verified) {
+          showName(username, true);
+        }
       }
     </script>
   </body>
